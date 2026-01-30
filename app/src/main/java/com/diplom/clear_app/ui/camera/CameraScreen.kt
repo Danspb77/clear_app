@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -429,8 +430,26 @@ private fun capturePhoto(
     onPhotoCaptured: (Uri) -> Unit,
     onError: (String) -> Unit
 ) {
+    // Используем getExternalFilesDir или getFilesDir как fallback
+    val storageDir = context.getExternalFilesDir(null) ?: context.filesDir
+    
+    // Пытаемся создать директорию, если её нет
+    if (!storageDir.exists()) {
+        val created = storageDir.mkdirs()
+        if (!created && !storageDir.exists()) {
+            onError("Не удалось создать директорию для сохранения фото")
+            return
+        }
+    }
+    
+    // Проверяем доступность записи
+    if (!storageDir.canWrite()) {
+        onError("Нет доступа для записи файлов")
+        return
+    }
+
     val photoFile = File(
-        context.getExternalFilesDir(null),
+        storageDir,
         SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.US)
             .format(System.currentTimeMillis()) + ".jpg"
     )
@@ -442,12 +461,18 @@ private fun capturePhoto(
         ContextCompat.getMainExecutor(context),
         object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                val savedUri = android.net.Uri.fromFile(photoFile)
+                // Используем FileProvider вместо Uri.fromFile() для совместимости с Android 7.0+
+                val savedUri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    photoFile
+                )
                 onPhotoCaptured(savedUri)
             }
 
             override fun onError(exception: ImageCaptureException) {
-                onError("Не удалось сделать фото. Попробуйте снова.")
+                val errorMsg = exception.message ?: "Не удалось сделать фото. Попробуйте снова."
+                onError("Ошибка: $errorMsg")
             }
         }
     )
